@@ -567,6 +567,11 @@ pub struct UserSettings {
     /// when a drawing opens (see `crate::io::font_repo`).
     #[serde(default = "default_check_missing_fonts")]
     pub check_missing_fonts: bool,
+    /// Offline mode: suppress every outbound request (update checks, Start-page
+    /// feeds, plugin marketplace, font downloads, remote image references).
+    /// Default off; distributors can pin it on with `OCS_FORCE_OFFLINE=1`.
+    #[serde(default)]
+    pub offline: bool,
     /// Custom font source base URL (empty = the OpenCADStudio community
     /// repository). Each missing font is fetched as `{base}/{file_name}`,
     /// so an intranet folder or a private GitHub raw folder both work.
@@ -1014,6 +1019,7 @@ impl Default for UserSettings {
             otrack: false,
             default_assoc_prompted: false,
             check_missing_fonts: true,
+            offline: false,
             font_source_url: String::new(),
             qnew_template: String::new(),
             donation_prompt_version: String::new(),

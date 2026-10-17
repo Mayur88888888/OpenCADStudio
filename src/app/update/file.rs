@@ -877,6 +877,7 @@ impl OpenCADStudio {
             otrack: self.snapper.otrack_enabled,
             default_assoc_prompted: self.default_assoc_prompted,
             check_missing_fonts: self.check_missing_fonts,
+            offline: crate::offline::is_offline(),
             font_source_url: self.font_source_url.clone(),
             qnew_template: self.qnew_template.clone(),
             donation_prompt_version: self.donation_prompt_version.clone(),
@@ -1049,6 +1050,10 @@ impl OpenCADStudio {
         self.snapper.otrack_enabled = s.otrack;
         self.default_assoc_prompted = s.default_assoc_prompted;
         self.check_missing_fonts = s.check_missing_fonts;
+        // Offline mode is process-wide (see `crate::offline`); applying the
+        // saved config refreshes the gate so background tasks spawned later
+        // honour it. `OCS_FORCE_OFFLINE=1` keeps it pinned on regardless.
+        crate::offline::init(s.offline);
         self.font_source_url = s.font_source_url.clone();
         self.qnew_template = s.qnew_template.clone();
         self.font_source_input = s.font_source_url.clone();
@@ -1341,6 +1346,11 @@ impl OpenCADStudio {
     /// Background task: fetch the curated plugin registry.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn fetch_registry_task(&self) -> Task<Message> {
+        if crate::offline::is_offline() {
+            return Task::done(Message::PluginRegistryFetched(Err(
+                crate::offline::NOTICE.to_string(),
+            )));
+        }
         Task::perform(
             async { crate::plugin::marketplace::fetch_registry() },
             Message::PluginRegistryFetched,
@@ -1353,6 +1363,12 @@ impl OpenCADStudio {
     /// otherwise block the async executor and serialise all repo fetches.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn fetch_releases_task(&self, repo: String) -> Task<Message> {
+        if crate::offline::is_offline() {
+            return Task::done(Message::PluginReleasesFetched(
+                repo,
+                Err(crate::offline::NOTICE.to_string()),
+            ));
+        }
         let label = repo.clone();
         Task::perform(
             async move {
@@ -1379,6 +1395,12 @@ impl OpenCADStudio {
     /// Background task: fetch a repository README from its default branch.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn fetch_plugin_readme_task(&self, repo: String) -> Task<Message> {
+        if crate::offline::is_offline() {
+            return Task::done(Message::PluginReadmeFetched(
+                repo,
+                Err(crate::offline::NOTICE.to_string()),
+            ));
+        }
         let label = repo.clone();
         Task::perform(
             async move { crate::plugin::marketplace::fetch_readme(&repo) },
@@ -1397,6 +1419,11 @@ impl OpenCADStudio {
     /// Background task: download and install the `tag` release of `owner/repo`.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn install_task(&self, repo: String, tag: String) -> Task<Message> {
+        if crate::offline::is_offline() {
+            return Task::done(Message::PluginInstalled(Err(
+                crate::offline::NOTICE.to_string(),
+            )));
+        }
         Task::perform(
             async move {
                 let releases = crate::plugin::marketplace::fetch_releases(&repo)?;
@@ -2382,7 +2409,7 @@ impl OpenCADStudio {
                 // Read-only/MCP evaluation sessions must remain non-blocking:
                 // report missing fonts through control state, but never offer
                 // a network/download mutation from a read-only launch.
-                if !missing.is_empty() && self.check_missing_fonts && !self.read_only {
+                if !missing.is_empty() && self.check_missing_fonts && !self.read_only && !crate::offline::is_offline() {
                     self.font_source_input = self.font_source_url.clone();
                     self.missing_fonts = Some(missing);
                     self.missing_fonts_path = self.tabs[i].current_path.clone();

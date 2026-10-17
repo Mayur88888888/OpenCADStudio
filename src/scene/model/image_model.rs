@@ -1220,6 +1220,11 @@ fn decode_or_note(attempt: DecodeAttempt, path: &str) -> Option<DecodedImage> {
 /// `ureq`; the web build defers to [`fetch_remote`] in the wasm block below.
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_remote(url: &str) -> Option<Vec<u8>> {
+    // Offline mode: never open a socket. The reference keeps showing the
+    // broken-image placeholder, exactly as it would with no route to host.
+    if crate::offline::is_offline() {
+        return None;
+    }
     let agent = crate::network::agent(std::time::Duration::from_secs(8));
     let mut resp = agent
         .get(url)

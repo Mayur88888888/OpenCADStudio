@@ -1743,6 +1743,13 @@ impl OpenCADStudio {
                 if self.missing_fonts_downloading {
                     return Task::none();
                 }
+                // Offline mode: never reach the font repository (the offer is
+                // already suppressed on open; this guards an already-open
+                // dialog after the setting changed mid-session).
+                if crate::offline::is_offline() {
+                    self.command_line.push_warning(crate::offline::NOTICE);
+                    return Task::none();
+                }
                 // Remember the source across sessions — and across drawings.
                 let source = self.font_source_input.trim().to_string();
                 if self.font_source_url != source {
