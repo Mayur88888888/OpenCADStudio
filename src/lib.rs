@@ -21,6 +21,8 @@ pub mod mcp_ops;
 pub mod modules;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod network;
+/// Offline-mode gate: when enabled the app makes no outbound requests at all.
+pub mod offline;
 pub mod par;
 pub mod patreon;
 pub mod perf;

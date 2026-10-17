@@ -14,6 +14,10 @@ impl OpenCADStudio {
         // operation until a client closed it by hand.
         if self.donation_prompt_version != env!("OCS_APP_VERSION")
             && !(self.control.enabled && self.control.automation_seen)
+            // Offline installs (air-gapped machines, `--offline`) get no
+            // donate-yourself link either — the prompt only points at a web
+            // page, so skip it rather than tease a click that can't load.
+            && !crate::offline::is_offline()
         {
             self.pending_startup_modals
                 .push_back(ModalKind::DonationPrompt);

@@ -4665,6 +4665,11 @@ impl OpenCADStudio {
 
     pub(crate) fn new() -> Self {
         let config = config::AppConfig::load();
+        // Offline gate: resolve before any boot task is spawned. A `--offline`
+        // flag or OCS_OFFLINE=1 wins over the saved setting;
+        // OCS_FORCE_OFFLINE=1 pins it on inside `init`.
+        crate::offline::apply_cli_override();
+        crate::offline::init(config.settings.offline);
         if let Err(error) = crate::i18n::set_language(config.settings.language) {
             eprintln!("Unable to apply saved UI language: {error}");
         }
@@ -5394,10 +5399,16 @@ impl OpenCADStudio {
         let mut s = state;
         s.main_window = Some(id);
         let open_main = open_task.map(|_| Message::Noop);
-        let check_update = Task::perform(
-            crate::io::update_check::check_for_update(),
-            Message::UpdateCheckResult,
-        );
+        // Offline mode skips the GitHub release poll entirely (see
+        // `crate::offline`); the update modal then never appears.
+        let check_update = if crate::offline::is_offline() {
+            Task::none()
+        } else {
+            Task::perform(
+                crate::io::update_check::check_for_update(),
+                Message::UpdateCheckResult,
+            )
+        };
         let focus_cmd = s.focus_cmd_input();
         // Startup configuration from the command line (see `cli`). File
         // arguments — also how the OS file association launches us when
@@ -5450,11 +5461,18 @@ impl OpenCADStudio {
         };
         s.queue_startup_prompts();
         // Fetch the Patreon supporters list once at boot for the Start page.
+        // Offline mode keeps the Start page on its local data instead: no
+        // request leaves the machine (see `crate::offline`).
         #[cfg(not(target_arch = "wasm32"))]
-        let patrons_fetch = Task::perform(
-            async { crate::patreon::fetch_patrons() },
-            Message::PatronsFetched,
-        );
+        let patrons_fetch = if crate::offline::is_offline() {
+            s.patrons = crate::patreon::merge_manual(Vec::new());
+            Task::none()
+        } else {
+            Task::perform(
+                async { crate::patreon::fetch_patrons() },
+                Message::PatronsFetched,
+            )
+        };
         #[cfg(target_arch = "wasm32")]
         let patrons_fetch = Task::none();
         // Tutorial videos: show the on-disk cache instantly, refresh from the
@@ -5465,18 +5483,24 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         let videos_fetch = {
             s.set_videos(crate::videos::load_cached());
-            s.videos_loading = true;
-            let (tx, rx) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(crate::videos::fetch_playlist());
-            });
-            Task::perform(
-                async move {
-                    rx.await
-                        .unwrap_or_else(|_| Err("video fetch thread died".into()))
-                },
-                Message::VideosFetched,
-            )
+            if crate::offline::is_offline() {
+                // Cache only — no playlist request leaves the machine.
+                s.videos_loading = false;
+                Task::none()
+            } else {
+                s.videos_loading = true;
+                let (tx, rx) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(crate::videos::fetch_playlist());
+                });
+                Task::perform(
+                    async move {
+                        rx.await
+                            .unwrap_or_else(|_| Err("video fetch thread died".into()))
+                    },
+                    Message::VideosFetched,
+                )
+            }
         };
         #[cfg(target_arch = "wasm32")]
         let videos_fetch = Task::none();
@@ -5485,18 +5509,24 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         let discussions_fetch = {
             s.discussions = crate::discussions::load_cached();
-            s.discussions_loading = true;
-            let (tx, rx) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(crate::discussions::fetch_discussions());
-            });
-            Task::perform(
-                async move {
-                    rx.await
-                        .unwrap_or_else(|_| Err("discussion fetch thread died".into()))
-                },
-                Message::DiscussionsFetched,
-            )
+            if crate::offline::is_offline() {
+                // Cache only — no feed request leaves the machine.
+                s.discussions_loading = false;
+                Task::none()
+            } else {
+                s.discussions_loading = true;
+                let (tx, rx) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(crate::discussions::fetch_discussions());
+                });
+                Task::perform(
+                    async move {
+                        rx.await
+                            .unwrap_or_else(|_| Err("discussion fetch thread died".into()))
+                    },
+                    Message::DiscussionsFetched,
+                )
+            }
         };
         #[cfg(target_arch = "wasm32")]
         let discussions_fetch = Task::none();
